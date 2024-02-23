@@ -1,3 +1,11 @@
+I Have forked this repo to add a few key pieces of functionality that I need for live use of Snapshots
+
+- Tracks Safes (tracks that are excluded from the save and recall of snapshots)
+- Record Functionality, by default the sws snapshots do not fully recall scenes when there is a recording running. To combat this, I have it stop the recording, recall the scene, then restart the recording
+- Snapshots, there is now an optional area to tie together snapshots and screensets so everything recalls at once.
+
+This is my first endeavor with cpp and none of the code here is guaranteed. Some were helped along by chatbot. I tried to mark all of my additions with comments such as //William for if anyone wants to fix this up for their own use. 
+
 # SWS Extension
 
 [![Build status](https://ci.appveyor.com/api/projects/status/6jq0uwut3mx14xp4/branch/master?svg=true)](https://ci.appveyor.com/project/reaper-oss/sws/branch/master)

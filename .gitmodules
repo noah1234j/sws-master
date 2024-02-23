@@ -1,0 +1,9 @@
+[submodule "vendor/WDL"]
+	path = vendor/WDL
+	url = https://github.com/justinfrankel/WDL
+[submodule "vendor/taglib"]
+	path = vendor/taglib
+	url = https://github.com/taglib/taglib
+[submodule "vendor/reaper-sdk"]
+	path = vendor/reaper-sdk
+	url = https://github.com/justinfrankel/reaper-sdk.git

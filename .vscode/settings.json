@@ -3,5 +3,6 @@
         "xstring": "cpp",
         "xlocale": "cpp",
         "xlocinfo": "cpp"
-    }
+    },
+    "C_Cpp.errorSquiggles": "disabled"
 }

@@ -711,7 +711,7 @@ bool TrackSnapshot::ProcessEnv(const char* chunk, char* line, int iLineMax, int*
 	return false;
 }
 
-Snapshot::Snapshot(int slot, int mask, bool bSelOnly, const char* name, const char* notes, const char* screenset)
+Snapshot::Snapshot(int slot, int mask, bool bSelOnly, const char* name, const char* notes, const char* screenset, bool filterSafeEnabled)
 {
 	m_iSlot = slot;
 	m_iMask = mask;
@@ -723,36 +723,26 @@ Snapshot::Snapshot(int slot, int mask, bool bSelOnly, const char* name, const ch
 	SetNotes(notes);
 	SetScreenSet(screenset);
 
-	// Store the GUID in projextstate under a specific key
-	//const char* extStateKey = "GUIDS"; // Unique key for your data
-	//const char* extStateValue = "{0589237B-2CC0-482E-BF8E-FF15F8512E14}, {CC9B5FEA-BB8F-48B2-94ED-4363F2D4B88E}"; // The GUID you want to store
-
-	// Set the project extension state
-	// Parameters are: project (NULL for current project), extension key (your identifier), key, and value
-	//SetProjExtState(NULL, "SceneSafes", extStateKey, extStateValue);
-
 	SWS_CacheObjectState(true);
-
-	//char savedGUIDs[4096]; // Buffer to hold the retrieved GUIDs list //william added
-	//int res = GetProjExtState(NULL, "SceneSafes", "GUIDS", savedGUIDs, sizeof(savedGUIDs)); // Attempt to retrieve the GUID list //william added
-	//std::string guidList = (res > 0) ? savedGUIDs : ""; // Convert to std::string if successful
+	char savedGUIDs[4096]; // Buffer to hold the retrieved GUIDs list //william added
+	int res = GetProjExtState(NULL, "SceneSafes", "GUIDS", savedGUIDs, sizeof(savedGUIDs)); // Attempt to retrieve the GUID list //william added
+	std::string guidList = (res > 0) ? savedGUIDs : ""; // Convert to std::string if successful
 
 	for (int i = 0; i <= GetNumTracks(); i++)
 	{
 		MediaTrack* tr = CSurf_TrackFromID(i, false);
 
-		//GUID* guid = GetTrackGUID(tr); //William Added this
-		//char guidStr[64]; // Ensure this buffer is large enough //william added
-		//memset(guidStr, 0, sizeof(guidStr)); // Initialize buffer to zeros //william added
-		//guidToString(guid, guidStr); // Convert GUID to string //william added
+		GUID* guid = GetTrackGUID(tr); //William Added this
+		char guidStr[64]; // Ensure this buffer is large enough //william added
+		memset(guidStr, 0, sizeof(guidStr)); // Initialize buffer to zeros //william added
+		guidToString(guid, guidStr); // Convert GUID to string //william added
 
-		// This filters if save only selected tracks is enabled
-		// And then checks if the GUID matches the one to be filtered out
-		// Inline parsing and checking if current track's GUID is in the list
 		if (!bSelOnly || *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL)) {
-			//if (guidList.find(guidStr) == std::string::npos) { //william added
+			if (guidList.find(guidStr) == std::string::npos && filterSafeEnabled) { //william added
 				m_tracks.Add(new TrackSnapshot(tr, mask));
-			//} //william added
+			} else if (!filterSafeEnabled){ //william
+				m_tracks.Add(new TrackSnapshot(tr, mask)); //william
+			}//william added
 		}
 	}
 	SWS_CacheObjectState(false);

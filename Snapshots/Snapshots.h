@@ -49,34 +49,6 @@ protected:
 	void OnItemClk(SWS_ListItem* item, int iCol, int iKeyState);
 };
 
-// class SWS_ScenesafeWnd : public SWS_DockWnd { //WILLIAM ADDED STARTING HERE
-// public:
-//     SWS_ScenesafeWnd();
-//     ~SWS_ScenesafeWnd();
-
-//     void Open(); // Function to open the scenesafe dialog
-
-//     // Possibly other members...
-
-// private:
-//     HWND m_hwnd; // Handle to the dialog window (if you need one)
-// };
-
-// SWS_ScenesafeWnd::SWS_ScenesafeWnd() {
-//     // Constructor initialization
-// }
-
-// SWS_ScenesafeWnd::~SWS_ScenesafeWnd() {
-//     // Destructor cleanup
-// }
-
-// void SWS_ScenesafeWnd::Open() {
-//     DialogBox(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_SAFES), m_hwnd, ScenesafeDialogProc);
-// } 
-
-// extern SWS_ScenesafeWnd* g_pSCNSFWnd;
-// //William Ended Here
-
 class SWS_SnapshotsWnd : public SWS_DockWnd
 {
 public:

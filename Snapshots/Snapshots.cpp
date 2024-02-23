@@ -70,7 +70,6 @@ public:
 // Globals
 static SWSProjConfig<ProjSnapshot> g_ss;
 SWS_SnapshotsWnd* g_pSSWnd=NULL;
-//SWS_ScenesafeWnd* g_pSCNSFWnd=NULL; //william added
 void PasteSnapshot(COMMAND_T*);
 void MergeSnapshot(Snapshot* ss);
 void DeleteSnapshot(Snapshot* ss);
@@ -81,6 +80,7 @@ static int g_compatMask = ALL_MASK; // // for disabling features unavailable in 
 static bool g_bSelOnly_OnRecall = false;
 static bool g_bSelOnly_OnSave = false;
 static bool g_record = false; //William Added
+static bool g_filtersafes = false; //William Added
 static int g_iSavedMask;
 static int g_iSavedType;
 static bool g_bApplyFilterOnRecall = true;
@@ -95,27 +95,6 @@ void UpdateSnapshotsDialog(bool bSelChange)
 	if (!bSelChange || g_bShowSelOnly)
 		g_pSSWnd->Update();
 }
-
-// INT_PTR CALLBACK ScenesafeDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) { //William added starting here
-//     switch (uMsg) {
-//         case WM_INITDIALOG:
-//             // Initialization code here
-//             return TRUE;
-//         case WM_COMMAND:
-//             switch (LOWORD(wParam)) {
-//                 case IDC_CLEAR: // Assuming you have a control to clear something
-//                     // Clear action here
-//                     return TRUE;
-//                 case IDOK:
-//                 case IDCANCEL:
-//                     EndDialog(hwndDlg, LOWORD(wParam));
-//                     return TRUE;
-//             }
-//             break;
-//     }
-//     return FALSE;
-// } //William Ended here
-
 
 // Clipboard operations:
 void CopySnapshotToClipboard(Snapshot* ss)
@@ -379,7 +358,7 @@ void SWS_SnapshotsView::OnItemClk(SWS_ListItem* item, int iCol, int iKeyState)
 	// Save (ctrl click)
 	if (!(iKeyState & LVKF_SHIFT) && (iKeyState & LVKF_CONTROL) && !(iKeyState & LVKF_ALT))
 	{
-		g_ss.Get()->m_pCurSnapshot = g_ss.Get()->m_snapshots.Set(g_ss.Get()->m_snapshots.Find(ss), new Snapshot(ss->m_iSlot, g_iMask, g_bSelOnly_OnSave, ss->m_cName, ss->m_cNotes, ss->m_cScreenSet)); //william temp removed  ss->m_cScreenSet
+		g_ss.Get()->m_pCurSnapshot = g_ss.Get()->m_snapshots.Set(g_ss.Get()->m_snapshots.Find(ss), new Snapshot(ss->m_iSlot, g_iMask, g_bSelOnly_OnSave, ss->m_cName, ss->m_cNotes, ss->m_cScreenSet, g_filtersafes)); //william temp removed  ss->m_cScreenSet and g filtersafes
 		delete ss;
 		Update();
 	}
@@ -467,6 +446,7 @@ void SWS_SnapshotsWnd::Update()
 	CheckDlgButton(m_hwnd, IDC_CUSTOM,				m_iSelType == 2			? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(m_hwnd, IDC_SELECTEDONLY_SAVE,	g_bSelOnly_OnSave		? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(m_hwnd, IDC_RECORD,          	g_record		        ? BST_CHECKED : BST_UNCHECKED); //WILLIAM ADDED
+	CheckDlgButton(m_hwnd, IDC_FILTERSAFES,         g_filtersafes		    ? BST_CHECKED : BST_UNCHECKED); //WILLIAM ADDED
 	CheckDlgButton(m_hwnd, IDC_SELECTEDONLY_RECALL,	g_bSelOnly_OnRecall		? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(m_hwnd, IDC_APPLYRECALL,			g_bApplyFilterOnRecall	? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(m_hwnd, IDC_NAMEPROMPT,			g_bPromptOnNew			? BST_CHECKED : BST_UNCHECKED);
@@ -638,29 +618,98 @@ void SWS_SnapshotsWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 			}
 			break;
 		}
-		// case IDC_SHOW_SAFES: 
-		// {
-		// 	break;
-		// }
-		// {
-		// 	char savedGUIDs[4096]; // Buffer to hold the retrieved GUIDs list
-		// 	int res = GetProjExtState(NULL, "SceneSafes", "GUIDS", savedGUIDs, sizeof(savedGUIDs)); // Attempt to retrieve the GUID list
-		// 	std::string guidList = (res > 0) ? savedGUIDs : ""; // Convert to std::string if successful
+		case IDC_SET_SAFES:
+		{
+		// Get the number of tracks in the current project
+		int numTracks = CountTracks(nullptr);
+		std::vector<std::string> guids;
 
-		// 		// Iterate over all tracks in the project
-		// 		for (int i = 0; i < GetNumTracks(); ++i) {
-		// 			MediaTrack* track = GetTrack(0, i);
-		// 			GUID* guid = GetTrackGUID(track); //William Added this
-		// 			char guidStr[64]; // Ensure this buffer is large enough
-		// 			memset(guidStr, 0, sizeof(guidStr)); // Initialize buffer to zeros
-		// 			guidToString(guid, guidStr); // Convert GUID to string
+		// Loop through all tracks
+		for (int i = 0; i < numTracks; ++i) {
+			MediaTrack* track = GetTrack(nullptr, i);
 
-		// 			if (guidList.find(guidStr) == std::string::npos) {
-		// 				ShowConsoleMsg("woot");
-		// 			}
-		// 		}
-		// 	break;
-		// }
+			// Check if the track is selected
+			if (*(bool*)GetSetMediaTrackInfo(track, "I_SELECTED", nullptr)) {
+				// Buffer to hold the GUID string
+				char guidBuf[128] = {0};
+				// Retrieve the track's GUID
+				GetSetMediaTrackInfo_String(track, "GUID", guidBuf, false);
+				// Add the GUID to the vector
+				guids.push_back(guidBuf);
+			}
+		}
+
+		// Concatenate all GUIDs into a single comma-separated string
+		std::ostringstream oss;
+		if (!guids.empty()) {
+			// Convert all but the last element to avoid a trailing comma
+			std::copy(guids.begin(), guids.end() - 1, std::ostream_iterator<std::string>(oss, ","));
+			// Now add the last element with no delimiter
+			oss << guids.back();
+		}
+    	// Store the comma-separated list of GUIDs in the project's extended state
+    	SetProjExtState(nullptr, "SceneSafes", "GUIDS", oss.str().c_str());
+		break;
+		}
+		case IDC_SHOW_SAFES: // William Added starting here
+		{
+			// Get the number of tracks in the current project
+			int numTracks = CountTracks(nullptr);
+
+			// Buffer for storing the GUIDs string from the project extended state
+			char guidList[4096] = {0}; // Adjust the size as needed
+			int extStateSize = 0;
+			// Retrieve the GUID list from the project extended state
+			GetProjExtState(nullptr, "SceneSafes", "GUIDS", guidList, sizeof(guidList));
+
+			// Assuming GUIDs are separated by a specific delimiter, e.g., a comma
+			std::string guidString(guidList);
+			std::istringstream guidStream(guidString);
+			std::string guid;
+			std::vector<std::string> guidVector;
+
+			// Extract GUIDs into a vector
+			while (std::getline(guidStream, guid, ',')) { // Adjust delimiter as necessary
+				guidVector.push_back(guid);
+			}
+
+			// Loop through all tracks
+			for (int i = 0; i < numTracks; ++i) {
+				MediaTrack* track = GetTrack(nullptr, i);
+				SetTrackSelected(track, false); // Deselect the track initially
+
+				// Buffer to hold the GUID string of the current track
+				char trackGUID[128] = {0};
+				// Retrieve the track's GUID
+				GetSetMediaTrackInfo_String(track, "GUID", trackGUID, false);
+
+				// Check if the current track's GUID is in the list of GUIDs
+				if (std::find(guidVector.begin(), guidVector.end(), std::string(trackGUID)) != guidVector.end()) {
+					// If so, select this track
+					SetTrackSelected(track, true);
+				}
+			}
+			break;
+		} // William ended here
+		{
+			char savedGUIDs[4096]; // Buffer to hold the retrieved GUIDs list
+			int res = GetProjExtState(NULL, "SceneSafes", "GUIDS", savedGUIDs, sizeof(savedGUIDs)); // Attempt to retrieve the GUID list
+			std::string guidList = (res > 0) ? savedGUIDs : ""; // Convert to std::string if successful
+
+				// Iterate over all tracks in the project
+				for (int i = 0; i < GetNumTracks(); ++i) {
+					MediaTrack* track = GetTrack(0, i);
+					GUID* guid = GetTrackGUID(track); //William Added this
+					char guidStr[64]; // Ensure this buffer is large enough
+					memset(guidStr, 0, sizeof(guidStr)); // Initialize buffer to zeros
+					guidToString(guid, guidStr); // Convert GUID to string
+
+					if (guidList.find(guidStr) == std::string::npos) {
+						ShowConsoleMsg("woot");
+					}
+				}
+			break;
+		}
 
 #ifdef _SNAP_TINY_BUTTONS
 		case BTNID_R:
@@ -685,7 +734,7 @@ void SWS_SnapshotsWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 			Snapshot* ss = (Snapshot*)m_pLists.Get(0)->EnumSelected(NULL);
 			if (ss)
 			{
-				g_ss.Get()->m_pCurSnapshot = g_ss.Get()->m_snapshots.Set(g_ss.Get()->m_snapshots.Find(ss), new Snapshot(ss->m_iSlot, g_iMask, g_bSelOnly_OnSave, ss->m_cName, ss->m_cNotes, ss->m_cScreenSet));
+				g_ss.Get()->m_pCurSnapshot = g_ss.Get()->m_snapshots.Set(g_ss.Get()->m_snapshots.Find(ss), new Snapshot(ss->m_iSlot, g_iMask, g_bSelOnly_OnSave, ss->m_cName, ss->m_cNotes, ss->m_cScreenSet, g_filtersafes));
 				delete ss;
 				Update();
 			}
@@ -756,6 +805,7 @@ void SWS_SnapshotsWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 		case IDC_CUSTOM:
 		case IDC_SELECTEDONLY_SAVE:
 		case IDC_RECORD: //WILLIAM ADDED
+		case IDC_FILTERSAFES: //WILLIAM ADDED
 		case IDC_SELECTEDONLY_RECALL:
 		case IDC_APPLYRECALL:
 		case IDC_NAMEPROMPT:
@@ -877,6 +927,7 @@ void SWS_SnapshotsWnd::OnDestroy()
 		g_bHideNewOnRecall ? 1 : 0,
 		g_bSelOnly_OnSave ? 1 : 0,
 		g_record ? 1 : 0, //William Added
+		g_filtersafes ? 1 : 0, //William added
 		m_iSelType,
 		g_bSelOnly_OnRecall ? 1 : 0,
 		g_bShowSelOnly ? 1 : 0,
@@ -934,6 +985,7 @@ void SWS_SnapshotsWnd::GetOptions()
 	}
 	g_bSelOnly_OnSave = IsDlgButtonChecked(m_hwnd, IDC_SELECTEDONLY_SAVE) == BST_CHECKED;
 	g_record = IsDlgButtonChecked(m_hwnd, IDC_RECORD) == BST_CHECKED; //WILLIAM ADDED
+	g_filtersafes = IsDlgButtonChecked(m_hwnd, IDC_FILTERSAFES) == BST_CHECKED; //WILLIAM ADDED
 	g_bSelOnly_OnRecall = IsDlgButtonChecked(m_hwnd, IDC_SELECTEDONLY_RECALL) == BST_CHECKED;
 	g_bHideNewOnRecall = IsDlgButtonChecked(m_hwnd, IDC_HIDENEW) == BST_CHECKED;
 	g_bShowSelOnly = IsDlgButtonChecked(m_hwnd, IDC_SHOWSELONLY) == BST_CHECKED;
@@ -955,9 +1007,9 @@ void SWS_SnapshotsWnd::ShowControls(bool bShow)
 	ShowWindow(GetDlgItem(m_hwnd, IDC_NEXT), bShow);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_SWAP_UP), bShow);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_SWAP_DOWN), bShow);
-	//ShowWindow(GetDlgItem(m_hwnd, IDC_OPEN_SAFES), bShow); //william ss
 	ShowWindow(GetDlgItem(m_hwnd, IDC_SELECTEDONLY_SAVE), bShow);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_RECORD), bShow); //WILLIAM ADDED
+	ShowWindow(GetDlgItem(m_hwnd, IDC_FILTERSAFES), bShow); //WILLIAM ADDED
 	ShowWindow(GetDlgItem(m_hwnd, IDC_SELECTEDONLY_RECALL), bShow);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_SHOWSELONLY), bShow);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_HELPTEXT), bShow);
@@ -999,7 +1051,7 @@ void OpenSnapshotsDialog(COMMAND_T*)
 void NewSnapshot(int iMask, bool bSelOnly)
 {
 	//clean up the slots when deleting and there won't be gaps to fill in the iSlot numbering...just append new entries.  :)
-	Snapshot* pNewSS = g_ss.Get()->m_snapshots.Add(new Snapshot(g_ss.Get()->m_snapshots.GetSize() + 1, iMask, bSelOnly, NULL, NULL, NULL)); //william added last null
+	Snapshot* pNewSS = g_ss.Get()->m_snapshots.Add(new Snapshot(g_ss.Get()->m_snapshots.GetSize() + 1, iMask, bSelOnly, NULL, NULL, NULL, g_filtersafes)); //william added last null
 	g_ss.Get()->m_pCurSnapshot = pNewSS;
 	if (g_bPromptOnNew)
 	{
@@ -1047,12 +1099,12 @@ void SaveSnapshot(int slot)
 				break;
 		char str[20];
 		snprintf(str, sizeof(str), "%s %d", __LOCALIZE("Mix","sws_DLG_101"), slot);
-		g_ss.Get()->m_pCurSnapshot = g_ss.Get()->m_snapshots.Insert(i, new Snapshot(slot, g_iMask, g_bSelOnly_OnSave, str, NULL, NULL)); //william added last null
+		g_ss.Get()->m_pCurSnapshot = g_ss.Get()->m_snapshots.Insert(i, new Snapshot(slot, g_iMask, g_bSelOnly_OnSave, str, NULL, NULL, g_filtersafes)); //william added last null and filtersafes
 	}
 	else // Overwriting slot
 	{
 		Snapshot* oldSnapshot = g_ss.Get()->m_snapshots.Get(i);
-		g_ss.Get()->m_pCurSnapshot = g_ss.Get()->m_snapshots.Set(i, new Snapshot(oldSnapshot->m_iSlot, g_iMask, g_bSelOnly_OnSave, oldSnapshot->m_cName, oldSnapshot->m_cNotes, oldSnapshot->m_cScreenSet)); //william added
+		g_ss.Get()->m_pCurSnapshot = g_ss.Get()->m_snapshots.Set(i, new Snapshot(oldSnapshot->m_iSlot, g_iMask, g_bSelOnly_OnSave, oldSnapshot->m_cName, oldSnapshot->m_cNotes, oldSnapshot->m_cScreenSet, g_filtersafes)); //william added
 		delete oldSnapshot;
 	}
 	g_pSSWnd->Update();
@@ -1134,6 +1186,7 @@ void SetSnapType(COMMAND_T* ct)
 void TogSnapParam(COMMAND_T* ct) { g_pSSWnd->SetFilterType(2); g_iMask ^= ct->user; UpdateSnapshotsDialog(); }
 void ToggleSelOnlySave(COMMAND_T*)	{ g_bSelOnly_OnSave = !g_bSelOnly_OnSave; UpdateSnapshotsDialog(); }
 void ToggleRecord(COMMAND_T*) { g_record = !g_record; UpdateSnapshotsDialog(); } //William Added
+void ToggleFilterSafes(COMMAND_T*) { g_filtersafes = !g_filtersafes; UpdateSnapshotsDialog(); } //William Added
 void ToggleSelOnlyRecall(COMMAND_T*){ g_bSelOnly_OnRecall = !g_bSelOnly_OnRecall; UpdateSnapshotsDialog(); }
 void ToggleShowForSelTracks(COMMAND_T*){ g_bShowSelOnly = !g_bShowSelOnly; UpdateSnapshotsDialog(); }
 void ToggleAppToRec(COMMAND_T*)	 { g_bApplyFilterOnRecall = !g_bApplyFilterOnRecall; UpdateSnapshotsDialog(); }
@@ -1149,6 +1202,8 @@ int IsSnapParamEn(COMMAND_T* ct)
 		return g_bSelOnly_OnSave;
 	else if (ct->doCommand == ToggleRecord) //William Added
 		return g_record; //William Added
+	else if (ct->doCommand == ToggleFilterSafes) //William Added
+		return g_filtersafes; //William Added
 	else if (ct->doCommand == ToggleSelOnlyRecall)
 		return g_bSelOnly_OnRecall;
 	else if (ct->doCommand == ToggleShowForSelTracks)
@@ -1172,13 +1227,13 @@ void CopyCurSnapshot(COMMAND_T*)
 
 void CopySelSnapshot(COMMAND_T*)
 {
-	Snapshot ss(1, g_iMask, true, __LOCALIZE("unnamed","sws_DLG_101"), NULL, NULL);
+	Snapshot ss(1, g_iMask, true, __LOCALIZE("unnamed","sws_DLG_101"), NULL, NULL, g_filtersafes);
 	CopySnapshotToClipboard(&ss);
 }
 
 void CopyAllSnapshot(COMMAND_T*)
 {
-	Snapshot ss(1, g_iMask, false, __LOCALIZE("unnamed","sws_DLG_101"), NULL, NULL);
+	Snapshot ss(1, g_iMask, false, __LOCALIZE("unnamed","sws_DLG_101"), NULL, NULL, g_filtersafes);
 	CopySnapshotToClipboard(&ss);
 }
 

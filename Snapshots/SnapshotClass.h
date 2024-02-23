@@ -125,7 +125,7 @@ const int cSSCtrls[] = { IDC_VOL,  IDC_PAN,  IDC_MUTE,  IDC_SOLO,  IDC_SENDS,  I
 class Snapshot
 {
 public:
-    Snapshot(int slot, int mask, bool bSelOnly, const char* name, const char* desc, const char* scrnset);   // For capture //william added last bit
+    Snapshot(int slot, int mask, bool bSelOnly, const char* name, const char* desc, const char* scrnset, bool filterSafeEnabled);   // For capture //william added last bit
 	Snapshot(const char* chunk); // For project load
     ~Snapshot();
     bool UpdateReaper(int mask, bool bSelOnly, bool bHideNewVis);
@@ -141,7 +141,8 @@ public:
 	void GetChunk(WDL_FastString* chunk);
 	void GetDetails(WDL_FastString* details);
 	bool IncludesSelTracks();
-
+	bool filterSafeEnabled; //william added;
+	
 // TODO these should be private
 	char* m_cName;
 	char* m_cNotes;

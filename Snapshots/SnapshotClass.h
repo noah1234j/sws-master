@@ -124,13 +124,14 @@ const int cSSCtrls[] = { IDC_VOL,  IDC_PAN,  IDC_MUTE,  IDC_SOLO,  IDC_SENDS,  I
 class Snapshot
 {
 public:
-    Snapshot(int slot, int mask, bool bSelOnly, const char* name, const char* desc);   // For capture
+    Snapshot(int slot, int mask, bool bSelOnly, const char* name, const char* desc, const char* screenset);   // For capture
 	Snapshot(const char* chunk); // For project load
     ~Snapshot();
     bool UpdateReaper(int mask, bool bSelOnly, bool bHideNewVis);
     char* Tooltip(char* str, int maxLen);
     void SetName(const char* name);
     void SetNotes(const char* notes);
+	void SetScreenSet(const char* screenset);
 	void AddSelTracks();
 	void DelSelTracks();
 	void SelectTracks();
@@ -143,6 +144,7 @@ public:
 // TODO these should be private
 	char* m_cName;
 	char* m_cNotes;
+	char* m_cScreenSet;
     int m_iSlot;
     int m_iMask;
 	int m_time;

@@ -711,15 +711,17 @@ bool TrackSnapshot::ProcessEnv(const char* chunk, char* line, int iLineMax, int*
 	return false;
 }
 
-Snapshot::Snapshot(int slot, int mask, bool bSelOnly, const char* name, const char* notes)
+Snapshot::Snapshot(int slot, int mask, bool bSelOnly, const char* name, const char* notes, const char* screenset)
 {
 	m_iSlot = slot;
 	m_iMask = mask;
 	m_time = (int)time(NULL);
 	m_cName = NULL;
 	m_cNotes = NULL;
+	m_cScreenSet = NULL;
 	SetName(name);
 	SetNotes(notes);
+	SetScreenSet(screenset);
 
 	SWS_CacheObjectState(true);
 	for (int i = 0; i <= GetNumTracks(); i++)
@@ -746,6 +748,7 @@ Snapshot::Snapshot(const char* chunk)
 	TrackSnapshot* ts = NULL;
 	m_cName = NULL;
 	m_cNotes = NULL;
+	m_cScreenSet = NULL;
 
 	int auxEnvsOccurence = -1;
 
@@ -786,6 +789,10 @@ Snapshot::Snapshot(const char* chunk)
 				SetNotes(lp.gettoken_str(5));
 			else
 				SetNotes("");
+			if (lp.getnumtokens() >= 7)
+				SetScreenSet(lp.gettoken_str(6));
+			else
+				SetScreenSet(NULL);
 		}
 		else if (strcmp("TRACK", lp.gettoken_str(0)) == 0 || strcmp("<TRACK", lp.gettoken_str(0)) == 0)
 		{
@@ -876,6 +883,7 @@ Snapshot::~Snapshot()
 {
 	delete [] m_cName;
 	delete [] m_cNotes;
+	delete [] m_cScreenSet;
 	m_tracks.Empty(true);
 }
 
@@ -1065,6 +1073,15 @@ void Snapshot::SetNotes(const char* notes)
 	strcpy(m_cNotes, notes);
 }
 
+void Snapshot::SetScreenSet(const char* screenset)
+{
+	delete [] m_cScreenSet;
+	if (!screenset)
+		screenset = "";
+	m_cScreenSet = new char[strlen(screenset)+1];
+	strcpy(m_cScreenSet, screenset);
+}
+
 void Snapshot::AddSelTracks()
 {
 	for (int i = 0; i <= GetNumTracks(); i++)
@@ -1149,7 +1166,7 @@ void Snapshot::GetChunk(WDL_FastString* chunk)
 {
 	WDL_FastString notes;
 	makeEscapedConfigString(m_cNotes, &notes);
-	chunk->SetFormatted(SNM_MAX_CHUNK_LINE_LENGTH, "<SWSSNAPSHOT \"%s\" %d %d %d %s\n", m_cName, m_iSlot, m_iMask, m_time, notes.Get());
+	chunk->SetFormatted(SNM_MAX_CHUNK_LINE_LENGTH, "<SWSSNAPSHOT \"%s\" %d %d %d %s %s\n", m_cName, m_iSlot, m_iMask, m_time, notes.Get(), m_cScreenSet ? m_cScreenSet : "");
 	for (int i = 0; i < m_tracks.GetSize(); i++)
 		m_tracks.Get(i)->GetChunk(chunk);
 	chunk->Append(">\n");

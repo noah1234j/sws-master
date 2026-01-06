@@ -191,7 +191,7 @@
 #define IDC_DELETE                      1091
 #define IDC_PREVIEW                     1092
 #define IDC_REMOVE                      1093
-// unused                               1094
+#define IDC_RECORD                      1094
 #define IDC_LIST                        1095
 #define IDC_EDIT                        1096
 #define IDC_COMBO                       1097

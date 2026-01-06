@@ -29,12 +29,22 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
+#include <cstdarg>
+#include <cstdio>
+#include <vector>
+#include <algorithm>
 
 #include "SnapshotClass.h"
 #include "Snapshots.h"
 #include "SnapshotMerge.h"
 #include "../Prompt.h"
 #include "SnM/SnM.h" // dynamic actions
+
+#include "../Utility/Base64.h"
+
+#include <sstream>
+#include <string>
 
 #include <WDL/projectcontext.h>
 #include <WDL/localize/localize.h>
@@ -91,6 +101,176 @@ static bool g_bPromptOnNew = false;
 static bool g_bHideOptions = false;
 static bool g_bShowSelOnly = false;
 static bool g_bPromptOnDeleted = true;
+static bool g_bFilterSafes = false;
+
+static std::string TrimGuidToken(const std::string& s)
+{
+	size_t start = 0;
+	while (start < s.size() && isspace(static_cast<unsigned char>(s[start])))
+		++start;
+	size_t end = s.size();
+	while (end > start && isspace(static_cast<unsigned char>(s[end - 1])))
+		--end;
+	return s.substr(start, end - start);
+}
+
+static std::string CanonicalizeGuidString(const std::string& s)
+{
+	std::string out;
+	out.reserve(s.size());
+	for (char ch : s)
+	{
+		if (ch == '{' || ch == '}')
+			continue;
+		if (ch == '\r' || ch == '\n')
+			continue;
+		out.push_back(static_cast<char>(toupper(static_cast<unsigned char>(ch))));
+	}
+	return out;
+}
+
+static std::vector<std::string> SplitGuidList(const std::string& list)
+{
+	std::vector<std::string> out;
+	std::string cur;
+	for (char ch : list)
+	{
+		if (ch == '\n' || ch == ';')
+		{
+			std::string t = TrimGuidToken(cur);
+			if (!t.empty())
+				out.push_back(t);
+			cur.clear();
+		}
+		else if (ch != '\r')
+		{
+			cur.push_back(ch);
+		}
+	}
+	std::string t = TrimGuidToken(cur);
+	if (!t.empty())
+		out.push_back(t);
+	return out;
+}
+
+static std::string GetSavedSafesGuidList()
+{
+	if (!GetProjExtState)
+		return std::string();
+	char savedGUIDs[8192] = {0};
+	int res = GetProjExtState(NULL, "SceneSafes", "GUIDS", savedGUIDs, sizeof(savedGUIDs));
+	int realLen = (int)strlen(savedGUIDs);
+	if (res < realLen)
+	{
+		res = realLen;
+	}
+	if (res <= 0)
+		return std::string();
+
+	std::string raw(savedGUIDs, static_cast<size_t>(res));
+
+	// REAPER serializes extstate values with <BIN> and base64 when newlines are present.
+	// Decode if the payload looks like base64; otherwise return the raw text.
+	auto isLikelyBase64 = [](const std::string& text) {
+		if (text.empty())
+			return false;
+		for (char ch : text)
+		{
+			if (!(isalnum(static_cast<unsigned char>(ch)) || ch == '+' || ch == '/' || ch == '=' || ch == '\n' || ch == '\r'))
+				return false;
+		}
+		return text.find('{') == std::string::npos; // original GUID text includes braces
+	};
+
+	if (isLikelyBase64(raw))
+	{
+		Base64 b64;
+		int decodedLen = 0;
+		if (char* decoded = b64.Decode(raw.c_str(), &decodedLen))
+		{
+			if (decodedLen > 0)
+			{
+				std::string decodedStr(decoded, static_cast<size_t>(decodedLen));
+				return decodedStr;
+			}
+		}
+	}
+
+	return raw;
+}
+
+static void SaveSafesFromSelection()
+{
+	if (!SetProjExtState)
+		return;
+	WDL_FastString guidList;
+	int trackCount = CountTracks(NULL);
+	int savedCount = 0;
+	for (int i = 0; i < trackCount; ++i)
+	{
+		MediaTrack* tr = GetTrack(NULL, i);
+		if (!tr)
+			continue;
+		const int sel = *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL);
+		if (!sel)
+			continue;
+		char guidStr[64];
+		guidToString((GUID*)GetSetMediaTrackInfo(tr, "GUID", NULL), guidStr);
+		if (guidList.GetLength())
+			guidList.Append(";"); // single-line to avoid RPP BIN encoding
+		guidList.Append(guidStr);
+		++savedCount;
+	}
+	const char* payload = guidList.Get();
+	int setRes = SetProjExtState(NULL, "SceneSafes", "GUIDS", payload);
+	char verify[8192] = {0};
+	int verifyLen = GetProjExtState ? GetProjExtState(NULL, "SceneSafes", "GUIDS", verify, sizeof(verify)) : -1;
+	MarkProjectDirty(NULL);
+}
+
+static void ShowSafes()
+{
+	// Always clear selection first so an empty safes list results in nothing selected.
+	std::string guidList = GetSavedSafesGuidList();
+	int trackCount = CountTracks(NULL);
+	for (int i = 0; i < trackCount; ++i)
+		SetTrackSelected(GetTrack(NULL, i), false);
+
+	if (guidList.empty())
+		return;
+
+	int matched = 0;
+	for (const auto& token : SplitGuidList(guidList))
+	{
+		GUID g = GUID_NULL;
+		stringToGuid(token.c_str(), &g);
+		if (!memcmp(&g, &GUID_NULL, sizeof(GUID)))
+			continue;
+		MediaTrack* tr = GuidToTrack(&g);
+		if (!tr)
+		{
+			// Fallback: string compare against track GUIDs in case parsing or format differs.
+			const std::string needle = CanonicalizeGuidString(token);
+			const int trackCount = CountTracks(NULL);
+			for (int i = 0; i < trackCount && !tr; ++i)
+			{
+				MediaTrack* cand = GetTrack(NULL, i);
+				char guidStr[64] = {};
+				guidToString((GUID*)GetSetMediaTrackInfo(cand, "GUID", NULL), guidStr);
+				if (CanonicalizeGuidString(guidStr) == needle)
+					tr = cand;
+			}
+		}
+		if (tr)
+		{
+			SetTrackSelected(tr, true);
+			++matched;
+		}
+		else
+		{
+		}
+	}
+}
 
 void UpdateSnapshotsDialog(bool bSelChange)
 {
@@ -345,7 +525,8 @@ void SWS_SnapshotsView::OnItemClk(SWS_ListItem* item, int iCol, int iKeyState)
 				Main_OnCommand(40444 + (int)screenSetIndex - 1, 0);
 		}
 		g_ss.Get()->m_pCurSnapshot = ss;
-		if (ss->UpdateReaper(g_bApplyFilterOnRecall ? g_iMask : ALL_MASK, g_bSelOnly_OnRecall, g_bHideNewOnRecall))
+		const std::string safes = g_bFilterSafes ? GetSavedSafesGuidList() : std::string();
+		if (ss->UpdateReaper(g_bApplyFilterOnRecall ? g_iMask : ALL_MASK, g_bSelOnly_OnRecall, g_bHideNewOnRecall, g_bFilterSafes, safes))
 			Update();
 		if (g_record)
 			Main_OnCommand(1013, 0); // resume recording after recall
@@ -391,7 +572,7 @@ SWS_SnapshotsWnd::SWS_SnapshotsWnd()
 {
 	// Restore state
 	char str[64];
-	GetPrivateProfileString(SWS_INI, SNAP_OPTIONS_KEY, "559 0 0 0 1 0 0 0 0 0 0 1", str, 64, get_ini_file());
+	GetPrivateProfileString(SWS_INI, SNAP_OPTIONS_KEY, "559 0 0 0 1 0 0 0 0 0 0 1 0", str, 64, get_ini_file());
 	LineParser lp(false);
 	if (!lp.parse(str))
 	{
@@ -408,6 +589,7 @@ SWS_SnapshotsWnd::SWS_SnapshotsWnd()
 		if (tokenIdx < tokenCount) g_bSelOnly_OnRecall = lp.gettoken_int(tokenIdx++) ? true : false;
 		if (tokenIdx < tokenCount) g_bShowSelOnly = lp.gettoken_int(tokenIdx++) ? true : false;
 		if (tokenIdx < tokenCount) g_bPromptOnDeleted = lp.gettoken_int(tokenIdx++) ? true : false;
+		if (tokenIdx < tokenCount) g_bFilterSafes = lp.gettoken_int(tokenIdx++) ? true : false;
 	}
 	// Remove deprecated FXATM
 	if (g_iMask & FXATM_MASK)
@@ -448,6 +630,7 @@ void SWS_SnapshotsWnd::Update()
 	CheckDlgButton(m_hwnd, IDC_RECORD,			g_record			? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(m_hwnd, IDC_SELECTEDONLY_RECALL,	g_bSelOnly_OnRecall		? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(m_hwnd, IDC_APPLYRECALL,			g_bApplyFilterOnRecall	? BST_CHECKED : BST_UNCHECKED);
+	CheckDlgButton(m_hwnd, IDC_FILTERSAFES,		g_bFilterSafes			? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(m_hwnd, IDC_NAMEPROMPT,			g_bPromptOnNew			? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(m_hwnd, IDC_HIDENEW,				g_bHideNewOnRecall		? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(m_hwnd, IDC_SHOWSELONLY,			g_bShowSelOnly			? BST_CHECKED : BST_UNCHECKED);
@@ -500,9 +683,12 @@ void SWS_SnapshotsWnd::OnInitDlg()
 	m_resize.init_item(IDC_SHOWSELONLY, 1.0, 0.0, 1.0, 0.0);
 	m_resize.init_item(IDC_HELPTEXT, 1.0, 0.0, 1.0, 0.0);
 	m_resize.init_item(IDC_APPLYRECALL, 1.0, 0.0, 1.0, 0.0);
+	m_resize.init_item(IDC_FILTERSAFES, 1.0, 0.0, 1.0, 0.0);
 	m_resize.init_item(IDC_NAMEPROMPT, 1.0, 0.0, 1.0, 0.0);
 	m_resize.init_item(IDC_HIDENEW, 1.0, 0.0, 1.0, 0.0);
 	m_resize.init_item(IDC_DELTRACKSPROMPT, 1.0, 0.0, 1.0, 0.0);
+	m_resize.init_item(IDC_SHOW_SAFES, 1.0, 0.0, 1.0, 0.0);
+	m_resize.init_item(IDC_SET_SAFES, 1.0, 0.0, 1.0, 0.0);
 #ifndef _SNAP_TINY_BUTTONS
 	m_resize.init_item(IDC_OPTIONS, 1.0, 1.0, 1.0, 1.0);
 #endif
@@ -538,7 +724,8 @@ void SWS_SnapshotsWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 			if (ss)
 			{
 				g_ss.Get()->m_pCurSnapshot = ss;
-				if (ss->UpdateReaper(g_bApplyFilterOnRecall ? g_iMask : ALL_MASK, g_bSelOnly_OnRecall, g_bHideNewOnRecall))
+				const std::string safes = g_bFilterSafes ? GetSavedSafesGuidList() : std::string();
+				if (ss->UpdateReaper(g_bApplyFilterOnRecall ? g_iMask : ALL_MASK, g_bSelOnly_OnRecall, g_bHideNewOnRecall, g_bFilterSafes, safes))
 					Update();
 			}
 			break;
@@ -559,7 +746,8 @@ void SWS_SnapshotsWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 			if (ss)
 			{
 				g_ss.Get()->m_pCurSnapshot = ss;
-				if (ss->UpdateReaper(g_bApplyFilterOnRecall ? g_iMask : ALL_MASK, g_bSelOnly_OnRecall, g_bHideNewOnRecall))
+				const std::string safes = g_bFilterSafes ? GetSavedSafesGuidList() : std::string();
+				if (ss->UpdateReaper(g_bApplyFilterOnRecall ? g_iMask : ALL_MASK, g_bSelOnly_OnRecall, g_bHideNewOnRecall, g_bFilterSafes, safes))
 					Update();
 			}
 			break;
@@ -570,7 +758,8 @@ void SWS_SnapshotsWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 			if (ss)
 			{
 				g_ss.Get()->m_pCurSnapshot = ss;
-				if (ss->UpdateReaper(g_bApplyFilterOnRecall ? g_iMask : ALL_MASK, g_bSelOnly_OnRecall, g_bHideNewOnRecall))
+				const std::string safes = g_bFilterSafes ? GetSavedSafesGuidList() : std::string();
+				if (ss->UpdateReaper(g_bApplyFilterOnRecall ? g_iMask : ALL_MASK, g_bSelOnly_OnRecall, g_bHideNewOnRecall, g_bFilterSafes, safes))
 					Update();
 			}
 			break;
@@ -630,6 +819,12 @@ void SWS_SnapshotsWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 			SendMessage(m_hwnd, WM_SIZE, 0, 0);
 			break;
 #endif
+		case IDC_SET_SAFES:
+			SaveSafesFromSelection();
+			break;
+		case IDC_SHOW_SAFES:
+			ShowSafes();
+			break;
 		case RENAME_MSG:
 			m_pLists.Get(0)->EditListItem(m_pLists.Get(0)->EnumSelected(NULL), 1);
 			break;
@@ -715,6 +910,7 @@ void SWS_SnapshotsWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 		case IDC_HIDENEW:
 		case IDC_SHOWSELONLY:
 		case IDC_DELTRACKSPROMPT:
+		case IDC_FILTERSAFES:
 			// Filter controls are handled in the default case
 			GetOptions();
 			Update();
@@ -822,7 +1018,7 @@ void SWS_SnapshotsWnd::OnDestroy()
 	char str[256];
 
 	// Save window state
-	sprintf(str, "%d %d %d %d %d %d %d %d %d %d %d",
+	sprintf(str, "%d %d %d %d %d %d %d %d %d %d %d %d",
 		g_iMask,
 		g_bApplyFilterOnRecall ? 1 : 0,
 		g_bHideOptions ? 1 : 0,
@@ -833,7 +1029,8 @@ void SWS_SnapshotsWnd::OnDestroy()
 		m_iSelType,
 		g_bSelOnly_OnRecall ? 1 : 0,
 		g_bShowSelOnly ? 1 : 0,
-		g_bPromptOnDeleted ? 1 : 0);
+		g_bPromptOnDeleted ? 1 : 0,
+		g_bFilterSafes ? 1 : 0);
 	WritePrivateProfileString(SWS_INI, SNAP_OPTIONS_KEY, str, get_ini_file());
 
 #ifdef _SNAP_TINY_BUTTONS
@@ -891,6 +1088,7 @@ void SWS_SnapshotsWnd::GetOptions()
 	g_bHideNewOnRecall = IsDlgButtonChecked(m_hwnd, IDC_HIDENEW) == BST_CHECKED;
 	g_bShowSelOnly = IsDlgButtonChecked(m_hwnd, IDC_SHOWSELONLY) == BST_CHECKED;
 	g_bApplyFilterOnRecall = IsDlgButtonChecked(m_hwnd, IDC_APPLYRECALL) == BST_CHECKED;
+	g_bFilterSafes = IsDlgButtonChecked(m_hwnd, IDC_FILTERSAFES) == BST_CHECKED;
 	g_bPromptOnNew = IsDlgButtonChecked(m_hwnd, IDC_NAMEPROMPT) == BST_CHECKED;
 	g_bPromptOnDeleted = IsDlgButtonChecked(m_hwnd, IDC_DELTRACKSPROMPT) == BST_CHECKED;
 }
@@ -914,9 +1112,12 @@ void SWS_SnapshotsWnd::ShowControls(bool bShow)
 	ShowWindow(GetDlgItem(m_hwnd, IDC_SHOWSELONLY), bShow);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_HELPTEXT), bShow);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_APPLYRECALL), bShow);
+	ShowWindow(GetDlgItem(m_hwnd, IDC_FILTERSAFES), bShow);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_NAMEPROMPT), bShow);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_HIDENEW), bShow);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_DELTRACKSPROMPT), bShow);
+	ShowWindow(GetDlgItem(m_hwnd, IDC_SHOW_SAFES), bShow);
+	ShowWindow(GetDlgItem(m_hwnd, IDC_SET_SAFES), bShow);
 }
 
 #ifdef _SNAP_TINY_BUTTONS

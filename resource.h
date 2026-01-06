@@ -447,6 +447,9 @@
 #define IDC_DELTRACKSPROMPT             1359 // snapshots
 #define IDC_PHASE                       1360 // snapshots
 #define IDC_PLAY_OFFSET                 1361 // snapshots
+#define IDC_FILTERSAFES                 1362 // snapshots safes
+#define IDC_SHOW_SAFES                  1363 // snapshots safes
+#define IDC_SET_SAFES                   1364 // snapshots safes
 
 // Next default values for new objects
 // 
@@ -454,7 +457,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        189
 #define _APS_NEXT_COMMAND_VALUE         40000
-#define _APS_NEXT_CONTROL_VALUE         1362
+#define _APS_NEXT_CONTROL_VALUE         1365
 #define _APS_NEXT_SYMED_VALUE           100
 #endif
 #endif

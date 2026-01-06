@@ -32,8 +32,65 @@
 #include "SnapshotClass.h"
 #include "Snapshots.h"
 
+#include <string>
+#include <cctype>
+#include <vector>
+#include <cstdarg>
+#include <cstdio>
+
 #include <WDL/projectcontext.h>
 #include <WDL/localize/localize.h>
+
+// Helpers for GUID list parsing/canonicalization (shared with Snapshots.cpp behavior)
+static std::string TrimGuidToken(const std::string& s)
+{
+	size_t start = 0;
+	while (start < s.size() && isspace(static_cast<unsigned char>(s[start])))
+		++start;
+	size_t end = s.size();
+	while (end > start && isspace(static_cast<unsigned char>(s[end - 1])))
+		--end;
+	return s.substr(start, end - start);
+}
+
+static std::string CanonicalizeGuidString(const std::string& s)
+{
+	std::string out;
+	out.reserve(s.size());
+	for (char ch : s)
+	{
+		if (ch == '{' || ch == '}')
+			continue;
+		if (ch == '\r' || ch == '\n')
+			continue;
+		out.push_back(static_cast<char>(toupper(static_cast<unsigned char>(ch))));
+	}
+	return out;
+}
+
+static std::vector<std::string> SplitGuidList(const std::string& list)
+{
+	std::vector<std::string> out;
+	std::string cur;
+	for (char ch : list)
+	{
+		if (ch == '\n' || ch == ';')
+		{
+			std::string t = TrimGuidToken(cur);
+			if (!t.empty())
+				out.push_back(t);
+			cur.clear();
+		}
+		else if (ch != '\r')
+		{
+			cur.push_back(ch);
+		}
+	}
+	std::string t = TrimGuidToken(cur);
+	if (!t.empty())
+		out.push_back(t);
+	return out;
+}
 
 FXSnapshot::FXSnapshot(MediaTrack* tr, int fx)
 {
@@ -288,7 +345,20 @@ TrackSnapshot::~TrackSnapshot()
 }
 
 // Returns true if cannot find the track to update!
-bool TrackSnapshot::UpdateReaper(int mask, bool bSelOnly, int* fxErr, bool wantChunk, WDL_PtrList<TrackSendFix>* pFix)
+static bool IsGuidInSafeList(const std::string& list, const GUID& guid)
+{
+	char guidStr[64];
+	guidToString(&guid, guidStr);
+	std::string needle = CanonicalizeGuidString(guidStr);
+	for (const auto& token : SplitGuidList(list))
+	{
+		if (CanonicalizeGuidString(token) == needle)
+			return true;
+	}
+	return false;
+}
+
+bool TrackSnapshot::UpdateReaper(int mask, bool bSelOnly, int* fxErr, bool wantChunk, WDL_PtrList<TrackSendFix>* pFix, bool safeFilterEnabled, const std::string& safeFilterList)
 {
 	MediaTrack* tr = GuidToTrack(&m_guid);
 	if (!tr)
@@ -297,6 +367,9 @@ bool TrackSnapshot::UpdateReaper(int mask, bool bSelOnly, int* fxErr, bool wantC
 	int iSel = *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL);
 	if (bSelOnly && !iSel)
 		return false; // Ignore if the track isn't selected
+
+	if (safeFilterEnabled && IsGuidInSafeList(safeFilterList, m_guid))
+		return false;
 
 	PreventUIRefresh(1);
 
@@ -400,7 +473,7 @@ void TrackSnapshot::GetChunk(WDL_FastString* chunk)
 	chunk->AppendFormatted(SNM_MAX_CHUNK_LINE_LENGTH, "<TRACK %s %.14f %.14f %d %d %d %d %d %d %.14f %.14f %.14f %.14f %d %d %.14f\n", 
 		guidStr, m_dVol, m_dPan, m_bMute ? 1 : 0, m_iSolo, m_iFXEn, m_iVis ^ 2, m_iSel, m_iPanMode, m_dPanWidth, m_dPanL, m_dPanR, m_dPanLaw, m_bPhase ? 1 : 0, m_iPlayOffsetFlag, m_dPlayOffset);
 	chunk->AppendFormatted(SNM_MAX_CHUNK_LINE_LENGTH, "NAME \"%s\" %d\n", m_sName.Get(), m_iTrackNum);
-	
+
 	m_sends.GetChunk(chunk);
 	for (int i = 0; i < m_fx.GetSize(); i++)
 		m_fx.Get(i)->GetChunk(chunk);
@@ -899,7 +972,7 @@ void DeleteTracksFromSnapshotOnError(WDL_PtrList<TrackSnapshot>& m_tracks)
 	}
 }
 
-bool Snapshot::UpdateReaper(int mask, bool bSelOnly, bool bHideNewVis)
+bool Snapshot::UpdateReaper(int mask, bool bSelOnly, bool bHideNewVis, bool safeFilterEnabled, const std::string& safeFilterList)
 {
 	char str[256];
 	int trackErr = 0, fxErr = 0;
@@ -909,12 +982,12 @@ bool Snapshot::UpdateReaper(int mask, bool bSelOnly, bool bHideNewVis)
 
 	// Do "non-chunk" stuff first
 	for (int i = 0; i < m_tracks.GetSize(); i++)
-		m_tracks.Get(i)->UpdateReaper(mask & m_iMask, bSelOnly, &fxErr, false, &sendFixes);
+		m_tracks.Get(i)->UpdateReaper(mask & m_iMask, bSelOnly, &fxErr, false, &sendFixes, safeFilterEnabled, safeFilterList);
 
 	// Then cache all ObjectState changes for the chunk updating
 	SWS_CacheObjectState(true);
 	for (int i = 0; i < m_tracks.GetSize(); i++)
-		if (m_tracks.Get(i)->UpdateReaper(mask & m_iMask, bSelOnly, &fxErr, true, &sendFixes))
+		if (m_tracks.Get(i)->UpdateReaper(mask & m_iMask, bSelOnly, &fxErr, true, &sendFixes, safeFilterEnabled, safeFilterList))
 			trackErr++;
 	SWS_CacheObjectState(false);
 

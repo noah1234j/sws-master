@@ -27,6 +27,8 @@
 
 #pragma once
 
+#include <string>
+
 #define DOUBLES_PER_LINE 8
 
 class FXSnapshot
@@ -54,10 +56,10 @@ class TrackSnapshot
 public:
     TrackSnapshot(MediaTrack* tr, int mask);
 	TrackSnapshot(TrackSnapshot& ts);
-    TrackSnapshot(LineParser* lp);
+	TrackSnapshot(LineParser* lp);
     ~TrackSnapshot();
 
-	bool UpdateReaper(int mask, bool bSelOnly, int* fxErr, bool wantChunk, WDL_PtrList<TrackSendFix>* pFix);
+	bool UpdateReaper(int mask, bool bSelOnly, int* fxErr, bool wantChunk, WDL_PtrList<TrackSendFix>* pFix, bool safeFilterEnabled, const std::string& safeFilterList);
 	bool Cleanup();
 	void GetChunk(WDL_FastString* chunk);
 	void GetDetails(WDL_FastString* details, int iMask);
@@ -124,10 +126,10 @@ const int cSSCtrls[] = { IDC_VOL,  IDC_PAN,  IDC_MUTE,  IDC_SOLO,  IDC_SENDS,  I
 class Snapshot
 {
 public:
-    Snapshot(int slot, int mask, bool bSelOnly, const char* name, const char* desc, const char* screenset);   // For capture
+	Snapshot(int slot, int mask, bool bSelOnly, const char* name, const char* desc, const char* screenset);   // For capture
 	Snapshot(const char* chunk); // For project load
-    ~Snapshot();
-    bool UpdateReaper(int mask, bool bSelOnly, bool bHideNewVis);
+	~Snapshot();
+	bool UpdateReaper(int mask, bool bSelOnly, bool bHideNewVis, bool safeFilterEnabled = false, const std::string& safeFilterList = std::string());
     char* Tooltip(char* str, int maxLen);
     void SetName(const char* name);
     void SetNotes(const char* notes);

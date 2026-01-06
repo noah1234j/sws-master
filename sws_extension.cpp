@@ -1099,6 +1099,8 @@ error:
 		IMPAPI(SetProjectMarker2);
 		IMPAPI(SetProjectMarker3);
 		IMPAPI(SetProjectMarker4);
+		IMPAPI(GetProjExtState);
+		IMPAPI(SetProjExtState);
 		IMPAPI(SetTempoTimeSigMarker);
 		IMPAPI(SetTakeStretchMarker);
 		IMPAPI(SetTrackAutomationMode);
